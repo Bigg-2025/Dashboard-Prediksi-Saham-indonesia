@@ -1,18 +1,20 @@
 """Historical Data -- data historis, line chart, candlestick, dan volume perdagangan."""
 
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+import pandas as pd
 import streamlit as st
 
 from src import config, predict
 from src.stock_names import get_stock_name
 from dashboard.components.charts import candlestick_chart, line_close_chart, volume_chart
-from dashboard.components.formatting import format_rupiah
+from dashboard.components.formatting import format_date_id, format_rupiah
 from dashboard.components.theme import apply_theme, hero
 
 st.set_page_config(page_title="Historical Data | Stock Dashboard", layout="wide")
@@ -20,7 +22,8 @@ apply_theme()
 
 hero(
     " Historical Data",
-    "Telusuri data historis harga saham: line chart, candlestick, volume, dan tabel data.",
+    "Telusuri data historis harga saham: line chart, candlestick, volume, dan tabel data. "
+    "Pilih rentang waktu instan atau tentukan sendiri tanggal awal & akhir.",
     badge="YAHOO FINANCE",
 )
 
@@ -41,9 +44,21 @@ with st.container(border=True):
     with col2:
         range_option = st.selectbox(
             " Rentang Waktu",
-            options=["3 Bulan", "6 Bulan", "1 Tahun", "2 Tahun", "5 Tahun", "Semua"],
+            options=["3 Bulan", "6 Bulan", "1 Tahun", "2 Tahun", "5 Tahun", "Semua", "Kustom (pilih tanggal)"],
             index=2,
         )
+
+    custom_start_date = None
+    custom_end_date = None
+    if range_option == "Kustom (pilih tanggal)":
+        col_start, col_end = st.columns(2)
+        with col_start:
+            custom_start_date = st.date_input("Dari Tanggal", value=date.today() - timedelta(days=180))
+        with col_end:
+            custom_end_date = st.date_input("Sampai Tanggal", value=date.today())
+        if custom_start_date > custom_end_date:
+            st.warning("Tanggal awal harus sebelum atau sama dengan tanggal akhir.")
+            st.stop()
 
 RANGE_DAYS = {
     "3 Bulan": 63, "6 Bulan": 126, "1 Tahun": 252,
@@ -66,8 +81,19 @@ with st.spinner(f"Mengambil data historis {config.TICKERS[stock_code]} dari Yaho
         )
         st.stop()
 
-n_days = RANGE_DAYS[range_option]
-view_df = df.tail(n_days) if n_days else df
+if range_option == "Kustom (pilih tanggal)":
+    start_ts = pd.Timestamp(custom_start_date)
+    end_ts = pd.Timestamp(custom_end_date)
+    view_df = df[(df["Date"] >= start_ts) & (df["Date"] <= end_ts)]
+    if view_df.empty:
+        st.warning(
+            "Tidak ada data pada rentang tanggal tersebut. Data historis yang tersedia untuk "
+            f"**{stock_code}**: {format_date_id(df['Date'].min())} sampai {format_date_id(df['Date'].max())}."
+        )
+        st.stop()
+else:
+    n_days = RANGE_DAYS[range_option]
+    view_df = df.tail(n_days) if n_days else df
 
 
 @st.cache_data(ttl=86400, show_spinner=False)

@@ -144,6 +144,14 @@ DEFAULT_HORIZON_LABEL = "1 Hari"
 # Batas maksimum jumlah sample backtest per horizon (agar tetap responsif)
 MAX_BACKTEST_SAMPLES = 300
 
+# Batas untuk fitur "prediksi sampai tanggal tertentu" di halaman Prediction.
+# MAX_PREDICTION_HORIZON_TRADING_DAYS mengikuti nilai horizon "1 Bulan" di atas
+# supaya konsisten dengan MAPE hasil backtest yang sudah tersedia untuk horizon
+# itu. MAX_PREDICTION_HORIZON_CALENDAR_DAYS dipakai sebagai batas atas widget
+# date_input (hari kalender, sudah termasuk akhir pekan).
+MAX_PREDICTION_HORIZON_TRADING_DAYS = HORIZON_OPTIONS["1 Bulan"]
+MAX_PREDICTION_HORIZON_CALENDAR_DAYS = 31
+
 
 def raw_data_path(stock_code: str) -> Path:
     return DATA_RAW_DIR / f"{stock_code}.csv"

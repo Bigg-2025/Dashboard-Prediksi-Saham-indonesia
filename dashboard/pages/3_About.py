@@ -193,9 +193,15 @@ mengenai **Prediksi Harga Saham menggunakan Long Short-Term Memory (LSTM)** berb
 **Streamlit**.
 
 ### Pengembang
-- **Nama:** Dwi Fajar Novianto
-- **Program Studi:** Matematika
-- **Institusi:** Universitas Negeri Yogyakarta
+
+**Pengembang 1**
+-  Dwi Fajar Novianto
+
+**Pengembang 2**
+- Dr. Retno Subekti, S.Si., M.Sc
+
+**Pengembang 3**
+- Hery Gunawan Muhammad
 
 ### Kontak
 - 🌐 **GitHub:** https://github.com/Bigg-2025

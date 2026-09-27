@@ -1,12 +1,14 @@
-"""Prediction -- pilih saham & horizon, ambil data terbaru, tampilkan prediksi + MAPE."""
+"""Prediction -- pilih saham & tanggal target, ambil data terbaru, tampilkan prediksi + MAPE."""
 
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+import pandas as pd
 import streamlit as st
 
 from src import config, predict
@@ -20,8 +22,9 @@ apply_theme()
 
 hero(
     "Prediction",
-    "Pilih saham dan horizon prediksi, lalu jalankan model LSTM dengan data terbaru dari Yahoo Finance. "
-    "Mendukung seluruh saham yang tercatat di Bursa Efek Indonesia.",
+    "Pilih saham dan tanggal target prediksi (maksimum 1 bulan ke depan), lalu jalankan model LSTM "
+    "dengan data terbaru dari Yahoo Finance. Mendukung seluruh saham yang tercatat di Bursa Efek "
+    "Indonesia.",
     badge="LSTM INFERENCE",
 )
 
@@ -53,17 +56,20 @@ with st.container(border=True):
                 "Di luar data training model."
             )
     with col_horizon:
-        st.markdown("Horizon Prediksi")
-        horizon_label = st.segmented_control(
-            "Horizon Prediksi",
-            options=horizon_labels,
-            default=config.DEFAULT_HORIZON_LABEL,
-            label_visibility="collapsed",
-        ) or config.DEFAULT_HORIZON_LABEL
+        today = date.today()
+        max_target_date = today + timedelta(days=config.MAX_PREDICTION_HORIZON_CALENDAR_DAYS)
+        target_date = st.date_input(
+            " Prediksi Sampai Tanggal",
+            value=min(today + timedelta(days=7), max_target_date),
+            min_value=today,
+            max_value=max_target_date,
+        )
+        st.caption(
+            f"Maksimum {config.MAX_PREDICTION_HORIZON_TRADING_DAYS} hari perdagangan "
+            "(kurang lebih 1 bulan) dari data terakhir."
+        )
 
     run_prediction = st.button(" Jalankan Prediksi", type="primary", width="stretch")
-
-horizon_days = config.HORIZON_OPTIONS[horizon_label]
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -89,14 +95,13 @@ def _cached_stock_name(code: str):
 
 if run_prediction:
     st.session_state["prediction_stock"] = stock_code
-    st.session_state["prediction_horizon"] = horizon_label
+    st.session_state["prediction_target_date"] = target_date
 
 active_stock = st.session_state.get("prediction_stock")
-active_horizon_label = st.session_state.get("prediction_horizon", config.DEFAULT_HORIZON_LABEL)
-active_horizon_days = config.HORIZON_OPTIONS[active_horizon_label]
+active_target_date = st.session_state.get("prediction_target_date")
 
 if not active_stock:
-    st.info(" Pilih saham & horizon, lalu klik **Jalankan Prediksi** untuk memulai.")
+    st.info(" Pilih saham & tanggal target, lalu klik **Jalankan Prediksi** untuk memulai.")
 else:
     ticker = config.TICKERS[active_stock]
     with st.spinner(f"Mengambil data terbaru {ticker} dari Yahoo Finance..."):
@@ -106,18 +111,42 @@ else:
             st.error(f"Gagal mengambil data dari Yahoo Finance untuk **{ticker}**.\n\nDetail: {exc}")
             st.stop()
 
-    _spinner_msg = f"Menjalankan model LSTM untuk horizon {active_horizon_label}..."
+    last_date = pd.Timestamp(history["Date"].iloc[-1])
+    target_timestamp = pd.Timestamp(active_target_date)
+    trading_days_to_target = pd.bdate_range(start=last_date + pd.Timedelta(days=1), end=target_timestamp)
+    horizon_days = len(trading_days_to_target)
+
+    if horizon_days < 1:
+        st.warning(
+            f"Tanggal **{format_date_id(target_timestamp)}** tidak setelah data historis terakhir "
+            f"({format_date_id(last_date)}). Pilih tanggal setelah tanggal tersebut."
+        )
+        st.stop()
+
+    max_horizon_days = config.MAX_PREDICTION_HORIZON_TRADING_DAYS
+    if horizon_days > max_horizon_days:
+        st.info(
+            f"Tanggal target lebih dari {max_horizon_days} hari perdagangan dari data terakhir, "
+            f"jadi prediksi dibatasi sampai {max_horizon_days} hari perdagangan ke depan "
+            "(kurang lebih 1 bulan)."
+        )
+        horizon_days = max_horizon_days
+
+    active_horizon_label = f"{horizon_days} hari perdagangan"
+
+    _spinner_msg = f"Menjalankan model LSTM untuk {active_horizon_label}..."
     if not predict.is_pretrained_stock(active_stock):
         _spinner_msg += " (kalibrasi scaler otomatis untuk saham ini, mohon tunggu...)"
     with st.spinner(_spinner_msg):
         try:
-            result = _cached_forecast(active_stock, active_horizon_days)
+            result = _cached_forecast(active_stock, horizon_days)
         except Exception as exc:  # noqa: BLE001
             st.error(f"Gagal menjalankan prediksi: {exc}")
             st.stop()
 
     st.success(
-        f"Prediksi **{active_stock}** ({ticker}) untuk horizon **{active_horizon_label}** berhasil dihitung."
+        f"Prediksi **{active_stock}** ({ticker}) sampai **{format_date_id(result.predicted_date)}** "
+        f"({active_horizon_label}) berhasil dihitung."
     )
 
     # -----------------------------------------------------------------
@@ -128,7 +157,7 @@ else:
         company_name=_cached_stock_name(active_stock),
         last_label=f"Harga Terakhir ({format_date_id(result.last_date)})",
         last_value_str=format_rupiah(result.last_close),
-        predicted_label=f"Prediksi {active_horizon_label} ({format_date_id(result.predicted_date)})",
+        predicted_label=f"Prediksi {format_date_id(result.predicted_date)} ({active_horizon_label})",
         predicted_value_str=format_rupiah(result.predicted_close),
         change_pct=result.change_pct,
         meta_caption=f"{ticker} &middot; Bursa Efek Indonesia",
@@ -159,12 +188,17 @@ else:
         )
 
         with st.expander(" Bandingkan MAPE di semua horizon"):
+            st.caption(
+                f"Horizon yang kamu pilih saat ini: **{active_horizon_label}**, dengan "
+                f"MAPE **{result.mape:.2f}%**. Grafik di bawah membandingkan MAPE pada "
+                "horizon-horizon standar sebagai referensi."
+            )
             with st.spinner("Menghitung backtest untuk semua horizon..."):
                 all_mape = _cached_all_horizons_mape(active_stock)
             labels = [lbl for lbl in horizon_labels if all_mape.get(lbl)]
             values = [all_mape[lbl]["mape"] for lbl in labels]
             st.plotly_chart(
-                mape_by_horizon_chart(labels, values, active_label=active_horizon_label),
+                mape_by_horizon_chart(labels, values),
                 width="stretch",
             )
     else:
@@ -181,11 +215,11 @@ else:
             forecast_path_chart(result.history, result.forecast_dates, result.forecast_closes),
             width="stretch",
         )
-        if active_horizon_days > 1:
+        if horizon_days > 1:
             st.caption(
                 f"Garis putus-putus oranye menunjukkan lintasan prediksi harian dari sekarang "
-                f"hingga {active_horizon_days} hari perdagangan ke depan; bintang menandai target "
-                f"horizon ({format_date_id(result.predicted_date)})."
+                f"hingga {horizon_days} hari perdagangan ke depan; bintang menandai tanggal "
+                f"target ({format_date_id(result.predicted_date)})."
             )
             with st.expander(" Lihat rincian prediksi harian"):
                 path_df = result.as_path_df().copy()
